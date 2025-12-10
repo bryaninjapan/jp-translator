@@ -7,8 +7,15 @@ export interface ProcessingResult {
   interpretation?: string; // Full text interpretation/glossary
 }
 
-// Legacy Clause interface removed as we are moving to full text mode
-// export interface Clause { ... }
+export interface TranslationHistory {
+  id: string;
+  timestamp: number;
+  model: string;
+  originalText: string;
+  translation: string;
+  interpretation: string;
+  preview: string; // First 100 chars of original text for quick preview
+}
 
 export interface ProcessingRequest {
   text: string;

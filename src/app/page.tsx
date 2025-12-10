@@ -1,12 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Loader2, CheckCircle, AlertCircle, FileDown, Languages, Settings2, Sparkles, Key, Send, BookOpen } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, FileDown, Languages, Settings2, Sparkles, Key, Send, BookOpen, History, X, Trash2 } from 'lucide-react';
 import axios from 'axios';
-import { ProcessingResult } from '@/lib/types';
-import { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType, TextRun } from 'docx';
+import { ProcessingResult, TranslationHistory } from '@/lib/types';
 import { saveAs } from 'file-saver';
 import { translateContentClient, testConnectionClient } from '@/lib/client-api';
+import { saveTranslationToHistory, getTranslationHistory, deleteTranslationFromHistory, clearTranslationHistory, exportToMarkdown } from '@/lib/history';
 
 const AVAILABLE_MODELS = [
   { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro Preview (Latest)' },
@@ -25,16 +25,19 @@ export default function Home() {
   const [result, setResult] = useState<ProcessingResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<TranslationHistory[]>([]);
   
   // Test Connection States
   const [isTestingKey, setIsTestingKey] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [testMessage, setTestMessage] = useState('');
 
-  // Load API key from local storage on mount
+  // Load API key and history from local storage on mount
   useEffect(() => {
     const savedKey = localStorage.getItem('jp_translator_api_key');
     if (savedKey) setApiKey(savedKey);
+    setHistory(getTranslationHistory());
   }, []);
 
   const handleSaveKey = () => {
@@ -116,13 +119,21 @@ export default function Home() {
         });
         const data = response.data;
         
-        setResult({ 
+        const completedResult = { 
           id: 'current',
-          status: 'completed', 
+          status: 'completed' as const, 
           originalText: data.originalText,
           translation: data.translation,
           interpretation: data.interpretation
-        });
+        };
+        
+        setResult(completedResult);
+        
+        // Auto-save to history
+        if (data.translation && data.interpretation) {
+          saveTranslationToHistory(data.originalText, data.translation, data.interpretation, model);
+          setHistory(getTranslationHistory()); // Refresh history list
+        }
       } catch (serverError: any) {
         // If 404 or network error, use client-side API (for GitHub Pages)
         if (serverError.response?.status === 404 || serverError.code === 'ERR_NETWORK') {
@@ -132,13 +143,21 @@ export default function Home() {
           
           const { translation, interpretation } = await translateContentClient(inputText, apiKey, model);
           
-          setResult({ 
+          const completedResult = { 
             id: 'current',
-            status: 'completed', 
+            status: 'completed' as const, 
             originalText: inputText,
             translation,
             interpretation
-          });
+          };
+          
+          setResult(completedResult);
+          
+          // Auto-save to history
+          if (translation && interpretation) {
+            saveTranslationToHistory(inputText, translation, interpretation, model);
+            setHistory(getTranslationHistory()); // Refresh history list
+          }
         } else {
           throw serverError;
         }
@@ -154,33 +173,78 @@ export default function Home() {
     setIsProcessing(false);
   };
 
-  const exportToDocx = async () => {
-    if (!result || !result.translation) return;
+  const exportToMarkdownFile = () => {
+    if (!result || !result.translation || !result.originalText) return;
 
-    const doc = new Document({
-      sections: [{
-        properties: {},
-        children: [
-          new Paragraph({ text: `Translation Report`, heading: "Heading1" }),
-          new Paragraph({ text: `Model: ${model}`, heading: "Heading2" }),
-          new Paragraph({ text: " " }),
-          
-          new Paragraph({ text: "全文译文 (Full Translation)", heading: "Heading1" }),
-          new Paragraph({ text: result.translation || "" }),
-          
-          new Paragraph({ text: " " }),
-          new Paragraph({ text: "专业解读 (Interpretation)", heading: "Heading1" }),
-          new Paragraph({ text: result.interpretation || "" }),
-          
-          new Paragraph({ text: " " }),
-          new Paragraph({ text: "原文 (Original)", heading: "Heading1" }),
-          new Paragraph({ text: result.originalText || "" }),
-        ],
-      }],
+    const date = new Date();
+    const dateStr = date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
     });
 
-    const blob = await Packer.toBlob(doc);
-    saveAs(blob, `translation-${new Date().getTime()}.docx`);
+    const markdown = `# 翻译报告
+
+**生成时间**: ${dateStr}  
+**使用模型**: ${model}
+
+---
+
+## 原文 (Original Text)
+
+${result.originalText}
+
+---
+
+## 译文 (Translation)
+
+${result.translation}
+
+---
+
+## 专业解读 (Professional Interpretation)
+
+${result.interpretation}
+
+---
+
+*此文档由 JP Legal Translator 自动生成*
+`;
+
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    saveAs(blob, `translation-${date.getTime()}.md`);
+  };
+
+  const exportHistoryToMarkdown = (historyItem: TranslationHistory) => {
+    const markdown = exportToMarkdown(historyItem);
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const date = new Date(historyItem.timestamp);
+    saveAs(blob, `translation-${date.getTime()}.md`);
+  };
+
+  const handleDeleteHistory = (id: string) => {
+    deleteTranslationFromHistory(id);
+    setHistory(getTranslationHistory());
+  };
+
+  const handleClearHistory = () => {
+    if (confirm('确定要清空所有历史记录吗？此操作不可恢复。')) {
+      clearTranslationHistory();
+      setHistory([]);
+    }
+  };
+
+  const loadHistoryItem = (historyItem: TranslationHistory) => {
+    setResult({
+      id: historyItem.id,
+      status: 'completed',
+      originalText: historyItem.originalText,
+      translation: historyItem.translation,
+      interpretation: historyItem.interpretation,
+    });
+    setShowHistory(false);
   };
 
   return (
@@ -199,13 +263,30 @@ export default function Home() {
             </div>
           </div>
           
-          <button 
-            onClick={() => setShowSettings(!showSettings)}
-            className={`p-2 rounded-lg transition-all ${showSettings ? 'bg-slate-200 text-slate-900' : 'hover:bg-slate-100 text-slate-500'}`}
-            title="API Settings"
-          >
-            <Settings2 className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => {
+                setShowHistory(!showHistory);
+                if (!showHistory) setHistory(getTranslationHistory());
+              }}
+              className={`p-2 rounded-lg transition-all relative ${showHistory ? 'bg-slate-200 text-slate-900' : 'hover:bg-slate-100 text-slate-500'}`}
+              title="Translation History"
+            >
+              <History className="w-6 h-6" />
+              {history.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                  {history.length > 9 ? '9+' : history.length}
+                </span>
+              )}
+            </button>
+            <button 
+              onClick={() => setShowSettings(!showSettings)}
+              className={`p-2 rounded-lg transition-all ${showSettings ? 'bg-slate-200 text-slate-900' : 'hover:bg-slate-100 text-slate-500'}`}
+              title="API Settings"
+            >
+              <Settings2 className="w-6 h-6" />
+            </button>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-180px)]">
@@ -213,6 +294,70 @@ export default function Home() {
           {/* Left Column: Input */}
           <div className="flex flex-col space-y-4 h-full">
             
+            {/* History Panel (Collapsible) */}
+            {showHistory && (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4 animate-in slide-in-from-top-2 fade-in max-h-[400px] flex flex-col">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold flex items-center gap-2 text-slate-700">
+                    <History className="w-4 h-4" /> 翻译历史 ({history.length}/20)
+                  </h3>
+                  {history.length > 0 && (
+                    <button
+                      onClick={handleClearHistory}
+                      className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      清空
+                    </button>
+                  )}
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-2">
+                  {history.length === 0 ? (
+                    <p className="text-sm text-slate-400 text-center py-8">暂无历史记录</p>
+                  ) : (
+                    history.map((item) => (
+                      <div
+                        key={item.id}
+                        className="p-3 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors group"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-slate-500 mb-1">
+                              {new Date(item.timestamp).toLocaleString('zh-CN')} · {item.model}
+                            </p>
+                            <p className="text-sm text-slate-700 truncate">{item.preview}</p>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => loadHistoryItem(item)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+                              title="查看"
+                            >
+                              <BookOpen className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => exportHistoryToMarkdown(item)}
+                              className="p-1.5 text-green-600 hover:bg-green-50 rounded"
+                              title="导出 Markdown"
+                            >
+                              <FileDown className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteHistory(item.id)}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                              title="删除"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Settings Panel (Collapsible) */}
             {showSettings && (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4 animate-in slide-in-from-top-2 fade-in">
@@ -351,11 +496,11 @@ export default function Home() {
                   </div>
                   {result.status === 'completed' && (
                     <button
-                      onClick={exportToDocx}
+                      onClick={exportToMarkdownFile}
                       className="text-sm bg-white border border-slate-200 hover:border-blue-300 hover:text-blue-600 px-3 py-1.5 rounded-md flex items-center gap-2 transition-all shadow-sm"
                     >
                       <FileDown className="w-4 h-4" />
-                      Download .docx
+                      Download .md
                     </button>
                   )}
                 </div>
