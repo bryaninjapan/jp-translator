@@ -6,6 +6,7 @@ import axios from 'axios';
 import { ProcessingResult } from '@/lib/types';
 import { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType, TextRun } from 'docx';
 import { saveAs } from 'file-saver';
+import { translateContentClient, testConnectionClient } from '@/lib/client-api';
 
 const AVAILABLE_MODELS = [
   { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro Preview (Latest)' },
@@ -62,22 +63,35 @@ export default function Home() {
 
     try {
       const provider = model.includes('gpt') ? 'openai' : 'google';
-      const response = await axios.post('/api/test-key', { 
-        apiKey, 
-        provider,
-        model // Pass the currently selected model
-      });
       
-      if (response.data.success) {
-        setTestStatus('success');
-        setTestMessage(response.data.message || 'Connected successfully!');
-      } else {
-        setTestStatus('error');
-        setTestMessage(response.data.message || 'Connection failed');
+      // Try server-side API first, fallback to client-side if 404 (static site)
+      try {
+        const response = await axios.post('/api/test-key', { 
+          apiKey, 
+          provider,
+          model
+        });
+        
+        if (response.data.success) {
+          setTestStatus('success');
+          setTestMessage(response.data.message || 'Connected successfully!');
+        } else {
+          setTestStatus('error');
+          setTestMessage(response.data.message || 'Connection failed');
+        }
+      } catch (serverError: any) {
+        // If 404 or network error, use client-side API (for GitHub Pages)
+        if (serverError.response?.status === 404 || serverError.code === 'ERR_NETWORK') {
+          const result = await testConnectionClient(apiKey, provider, model);
+          setTestStatus(result.success ? 'success' : 'error');
+          setTestMessage(result.message);
+        } else {
+          throw serverError;
+        }
       }
     } catch (error: any) {
       setTestStatus('error');
-      setTestMessage(error.response?.data?.message || error.message || 'Connection failed');
+      setTestMessage(error.message || 'Connection failed');
     } finally {
       setIsTestingKey(false);
     }
@@ -93,26 +107,47 @@ export default function Home() {
     if (apiKey) localStorage.setItem('jp_translator_api_key', apiKey);
 
     try {
-      const response = await axios.post('/api/process', { 
-        text: inputText, 
-        apiKey: apiKey || undefined, 
-        model 
-      });
-      const data = response.data;
-      
-      setResult({ 
-        id: 'current',
-        status: 'completed', 
-        originalText: data.originalText,
-        translation: data.translation,
-        interpretation: data.interpretation
-      });
-
+      // Try server-side API first, fallback to client-side if 404 (static site)
+      try {
+        const response = await axios.post('/api/process', { 
+          text: inputText, 
+          apiKey: apiKey || undefined, 
+          model 
+        });
+        const data = response.data;
+        
+        setResult({ 
+          id: 'current',
+          status: 'completed', 
+          originalText: data.originalText,
+          translation: data.translation,
+          interpretation: data.interpretation
+        });
+      } catch (serverError: any) {
+        // If 404 or network error, use client-side API (for GitHub Pages)
+        if (serverError.response?.status === 404 || serverError.code === 'ERR_NETWORK') {
+          if (!apiKey) {
+            throw new Error('API Key is required for client-side translation');
+          }
+          
+          const { translation, interpretation } = await translateContentClient(inputText, apiKey, model);
+          
+          setResult({ 
+            id: 'current',
+            status: 'completed', 
+            originalText: inputText,
+            translation,
+            interpretation
+          });
+        } else {
+          throw serverError;
+        }
+      }
     } catch (error: any) {
       setResult({ 
         id: 'current',
         status: 'error', 
-        error: error.response?.data?.error || error.message 
+        error: error.message || 'Translation failed'
       });
     }
 
