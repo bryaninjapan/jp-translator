@@ -40,11 +40,36 @@ jobs:
           OUTPUT: export
         continue-on-error: false
 
-      - name: Check build output
-        if: failure()
+      - name: Verify build output
         run: |
-          echo "Build failed. Showing last 100 lines of build log:"
-          tail -100 build.log || true
+          echo "Checking build status..."
+          echo "Current directory contents:"
+          ls -la || true
+          echo ""
+          echo "Checking if out directory exists..."
+          if [ ! -d "out" ]; then
+            echo "❌ ERROR: out directory not found after build!"
+            echo ""
+            echo "Build log (last 200 lines):"
+            tail -200 build.log || true
+            echo ""
+            echo "Checking .next directory:"
+            ls -la .next 2>/dev/null || echo ".next directory not found"
+            echo ""
+            echo "Checking for any error patterns in build log:"
+            grep -i "error\|fail\|warning" build.log | tail -50 || true
+            exit 1
+          fi
+          echo "✅ Build output verified. Contents of out directory:"
+          ls -la out/ | head -30 || true
+          echo ""
+          echo "Total files in out:"
+          find out -type f | wc -l || true
+          echo ""
+          echo "Checking for index.html:"
+          ls -la out/index.html 2>/dev/null || echo "⚠️  index.html not found in root"
+          echo "Checking for _next directory:"
+          ls -la out/_next 2>/dev/null || echo "⚠️  _next directory not found"
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

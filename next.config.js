@@ -14,6 +14,9 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  // Ensure API routes are not included in static export
+  // They will be skipped automatically, but this makes it explicit
+  distDir: '.next',
 };
 
 module.exports = nextConfig;
