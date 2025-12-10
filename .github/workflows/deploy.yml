@@ -32,9 +32,19 @@ jobs:
         run: npm ci
 
       - name: Build
-        run: npm run build
+        run: |
+          echo "Building with basePath: /jp-translator"
+          npm run build 2>&1 | tee build.log
         env:
           NEXT_PUBLIC_BASE_PATH: /jp-translator
+          OUTPUT: export
+        continue-on-error: false
+
+      - name: Check build output
+        if: failure()
+        run: |
+          echo "Build failed. Showing last 100 lines of build log:"
+          tail -100 build.log || true
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

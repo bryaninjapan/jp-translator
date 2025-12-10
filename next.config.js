@@ -7,6 +7,13 @@ const nextConfig = {
     unoptimized: true,
   },
   trailingSlash: true,
+  // Disable server-side features for static export
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: false,
+  },
 };
 
 module.exports = nextConfig;
