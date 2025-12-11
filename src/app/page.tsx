@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { Loader2, CheckCircle, AlertCircle, FileDown, Languages, Settings2, Sparkles, Key, Send, BookOpen, History, X, Trash2 } from 'lucide-react';
-import axios from 'axios';
 import { ProcessingResult, TranslationHistory } from '@/lib/types';
 import { saveAs } from 'file-saver';
 import { translateContentClient, testConnectionClient } from '@/lib/client-api';
@@ -67,32 +66,10 @@ export default function Home() {
     try {
       const provider = model.includes('gpt') ? 'openai' : 'google';
       
-      // Try server-side API first, fallback to client-side if 404 (static site)
-      try {
-        const response = await axios.post('/api/test-key', { 
-          apiKey, 
-          provider,
-          model
-        });
-        
-        if (response.data.success) {
-          setTestStatus('success');
-          setTestMessage(response.data.message || 'Connected successfully!');
-        } else {
-          setTestStatus('error');
-          setTestMessage(response.data.message || 'Connection failed');
-        }
-      } catch (serverError: any) {
-        // If 404, 405 (static site), or network error, use client-side API (for GitHub Pages)
-        const status = serverError.response?.status;
-        if (status === 404 || status === 405 || serverError.code === 'ERR_NETWORK') {
-          const result = await testConnectionClient(apiKey, provider, model);
-          setTestStatus(result.success ? 'success' : 'error');
-          setTestMessage(result.message);
-        } else {
-          throw serverError;
-        }
-      }
+      // Use client-side API directly for GitHub Pages compatibility
+      const result = await testConnectionClient(apiKey, provider, model);
+      setTestStatus(result.success ? 'success' : 'error');
+      setTestMessage(result.message);
     } catch (error: any) {
       setTestStatus('error');
       setTestMessage(error.message || 'Connection failed');
@@ -111,58 +88,28 @@ export default function Home() {
     if (apiKey) localStorage.setItem('jp_translator_api_key', apiKey);
 
     try {
-      // Try server-side API first, fallback to client-side if 404 (static site)
-      try {
-        const response = await axios.post('/api/process', { 
-          text: inputText, 
-          apiKey: apiKey || undefined, 
-          model 
-        });
-        const data = response.data;
-        
-        const completedResult = { 
-          id: 'current',
-          status: 'completed' as const, 
-          originalText: data.originalText,
-          translation: data.translation,
-          interpretation: data.interpretation
-        };
-        
-        setResult(completedResult);
-        
-        // Auto-save to history
-        if (data.translation && data.interpretation) {
-          saveTranslationToHistory(data.originalText, data.translation, data.interpretation, model);
-          setHistory(getTranslationHistory()); // Refresh history list
-        }
-      } catch (serverError: any) {
-        // If 404, 405 (static site), or network error, use client-side API (for GitHub Pages)
-        const status = serverError.response?.status;
-        if (status === 404 || status === 405 || serverError.code === 'ERR_NETWORK') {
-          if (!apiKey) {
-            throw new Error('API Key is required for client-side translation');
-          }
-          
-          const { translation, interpretation } = await translateContentClient(inputText, apiKey, model);
-          
-          const completedResult = { 
-            id: 'current',
-            status: 'completed' as const, 
-            originalText: inputText,
-            translation,
-            interpretation
-          };
-          
-          setResult(completedResult);
-          
-          // Auto-save to history
-          if (translation && interpretation) {
-            saveTranslationToHistory(inputText, translation, interpretation, model);
-            setHistory(getTranslationHistory()); // Refresh history list
-          }
-        } else {
-          throw serverError;
-        }
+      // Always try client-side API first for GitHub Pages compatibility
+      // This avoids 405 errors on static sites
+      if (!apiKey) {
+        throw new Error('API Key is required for translation');
+      }
+      
+      const { translation, interpretation } = await translateContentClient(inputText, apiKey, model);
+      
+      const completedResult = { 
+        id: 'current',
+        status: 'completed' as const, 
+        originalText: inputText,
+        translation,
+        interpretation
+      };
+      
+      setResult(completedResult);
+      
+      // Auto-save to history
+      if (translation && interpretation) {
+        saveTranslationToHistory(inputText, translation, interpretation, model);
+        setHistory(getTranslationHistory());
       }
     } catch (error: any) {
       setResult({ 
