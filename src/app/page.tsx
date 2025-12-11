@@ -83,8 +83,9 @@ export default function Home() {
           setTestMessage(response.data.message || 'Connection failed');
         }
       } catch (serverError: any) {
-        // If 404 or network error, use client-side API (for GitHub Pages)
-        if (serverError.response?.status === 404 || serverError.code === 'ERR_NETWORK') {
+        // If 404, 405 (static site), or network error, use client-side API (for GitHub Pages)
+        const status = serverError.response?.status;
+        if (status === 404 || status === 405 || serverError.code === 'ERR_NETWORK') {
           const result = await testConnectionClient(apiKey, provider, model);
           setTestStatus(result.success ? 'success' : 'error');
           setTestMessage(result.message);
@@ -135,8 +136,9 @@ export default function Home() {
           setHistory(getTranslationHistory()); // Refresh history list
         }
       } catch (serverError: any) {
-        // If 404 or network error, use client-side API (for GitHub Pages)
-        if (serverError.response?.status === 404 || serverError.code === 'ERR_NETWORK') {
+        // If 404, 405 (static site), or network error, use client-side API (for GitHub Pages)
+        const status = serverError.response?.status;
+        if (status === 404 || status === 405 || serverError.code === 'ERR_NETWORK') {
           if (!apiKey) {
             throw new Error('API Key is required for client-side translation');
           }
